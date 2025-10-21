@@ -3,6 +3,8 @@ import logger from './logger.js';
 
 const DATABASE_URL = process.env.DATABASE_URL || '';
 let pool = null;
+
+// Fallback in-memory store (kalau DATABASE_URL tidak di-set)
 const memory = { swaps: new Map() };
 
 export async function initDb() {
@@ -10,7 +12,10 @@ export async function initDb() {
     logger.warn('DATABASE_URL not set, using in-memory store (non-persistent).');
     return;
   }
-  pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.PGSSL === '0' ? false : { rejectUnauthorized: false } });
+  pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: process.env.PGSSL === '0' ? false : { rejectUnauthorized: false }
+  });
   await pool.query(`
     CREATE TABLE IF NOT EXISTS swaps (
       id TEXT PRIMARY KEY,
@@ -26,14 +31,14 @@ export async function initDb() {
 
 export async function upsertSwap(rec) {
   if (!pool) { memory.swaps.set(rec.id, rec); return; }
-  const q = "
+  const q = `
     INSERT INTO swaps (id, status, mode, created_at, updated_at, body)
     VALUES ($1,$2,$3,$4,$5,$6)
     ON CONFLICT (id) DO UPDATE SET
       status = EXCLUDED.status,
       updated_at = EXCLUDED.updated_at,
       body = EXCLUDED.body
-  ";
+  `;
   await pool.query(q, [rec.id, rec.status, rec.mode, rec.created_at, rec.updated_at, rec.body]);
 }
 
@@ -43,8 +48,12 @@ export async function getSwap(id) {
   return r.rows[0] || null;
 }
 
-export async function listSwaps(limit=50) {
-  if (!pool) return Array.from(memory.swaps.values()).sort((a,b)=> new Date(b.created_at)-new Date(a.created_at)).slice(0, limit);
+export async function listSwaps(limit = 50) {
+  if (!pool) {
+    return Array.from(memory.swaps.values())
+      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, limit);
+  }
   const r = await pool.query('SELECT * FROM swaps ORDER BY created_at DESC LIMIT $1', [limit]);
   return r.rows;
 }
